@@ -55,7 +55,6 @@
       background-color: black;
       color: white;
       z-index: 1;
-      transform: translateX(-20px);
     }
 
     .key:hover {
@@ -69,10 +68,37 @@
     .key.pressed {
       opacity: 0.5;
     }
+
+    .controls {
+      position: fixed;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+    }
+
+    select {
+      padding: 8px 16px;
+      font-size: 16px;
+      border-radius: 4px;
+      background: white;
+      border: 1px solid #666;
+      cursor: pointer;
+    }
   </style>
 </head>
 
 <body>
+  <div class="controls">
+    <select id="instrument-select">
+      <option value="piano">Piano</option>
+      <option value="synthPiano">Synth Piano</option>
+      <option value="organ">Organ</option>
+      <option value="synth">Synth</option>
+      <option value="musicBox">Music Box</option>
+      <option value="strings">Strings</option>
+    </select>
+  </div>
   <div class="piano"></div>
 
   <script>
@@ -146,87 +172,267 @@
     createKeys(bottomRowNotes, bottomRow);
     createKeys(topRowNotes, topRow);
 
+    const instruments = {
+      piano: {
+        oscillators: [
+          // Main tone - brighter with more triangle
+          { type: 'triangle', ratio: 1, gain: 0.5 },
+          // Bright upper harmonics
+          { type: 'triangle', ratio: 2, gain: 0.4 },    // Stronger 2nd harmonic
+          { type: 'triangle', ratio: 3, gain: 0.3 },    // Stronger 3rd harmonic
+          { type: 'triangle', ratio: 4, gain: 0.2 },    // Added 4th harmonic
+          // Crisp attack transients
+          { type: 'square', ratio: 6, gain: 0.05 },
+          { type: 'square', ratio: 8, gain: 0.03 },
+          // Slight chorus effect for richness
+          { type: 'triangle', ratio: 1.002, gain: 0.2 },
+          { type: 'triangle', ratio: 0.998, gain: 0.2 }
+        ],
+        attack: 0.001,    // Very fast attack
+        decay: 0.08,      // Shorter decay for brightness
+        sustain: 0.2,     // Higher sustain level
+        release: 0.2,     // Shorter release
+        filterFreq: 8000, // Higher filter frequency for brightness
+        filterQ: 0.7      // Slight resonance
+      },
+      synthPiano: {
+        oscillators: [
+          { type: 'triangle', ratio: 1, gain: 0.5 },
+          { type: 'sine', ratio: 2, gain: 0.2 },
+          { type: 'sine', ratio: 3, gain: 0.1 },
+          { type: 'sine', ratio: 4, gain: 0.15 },
+          { type: 'triangle', ratio: 1.0003, gain: 0.2 },
+          { type: 'triangle', ratio: 0.9997, gain: 0.2 },
+          { type: 'sine', ratio: 0.5, gain: 0.1 }
+        ],
+        attack: 0.005,
+        decay: 0.07,
+        sustain: 0.3,
+        release: 0.8,
+        filterFreq: 3500,
+        filterQ: 2
+      },
+      organ: {
+        oscillators: [
+          { type: 'sine', ratio: 1, gain: 0.6 },
+          { type: 'sine', ratio: 2, gain: 0.4 },
+          { type: 'sine', ratio: 4, gain: 0.2 },
+          { type: 'sine', ratio: 8, gain: 0.1 }
+        ],
+        attack: 0.05,
+        decay: 0.1,
+        sustain: 0.8,
+        release: 0.3,
+        filterFreq: 8000
+      },
+      synth: {
+        oscillators: [
+          { type: 'sawtooth', ratio: 1, gain: 0.5 },
+          { type: 'square', ratio: 1.01, gain: 0.3 },
+          { type: 'sine', ratio: 2, gain: 0.2 }
+        ],
+        attack: 0.01,
+        decay: 0.2,
+        sustain: 0.6,
+        release: 0.4,
+        filterFreq: 4000
+      },
+      musicBox: {
+        oscillators: [
+          { type: 'sine', ratio: 1, gain: 0.7 },
+          { type: 'sine', ratio: 3, gain: 0.2 },
+          { type: 'sine', ratio: 6, gain: 0.1 }
+        ],
+        attack: 0.01,
+        decay: 0.1,
+        sustain: 0.2,
+        release: 0.3,
+        filterFreq: 6000
+      },
+      strings: {
+        oscillators: [
+          { type: 'sawtooth', ratio: 1, gain: 0.3 },
+          { type: 'sawtooth', ratio: 1.01, gain: 0.3 },
+          { type: 'sawtooth', ratio: 0.99, gain: 0.3 }
+        ],
+        attack: 0.1,
+        decay: 0.2,
+        sustain: 0.7,
+        release: 0.5,
+        filterFreq: 3000
+      }
+    };
+
     function createPianoSound(frequency) {
-      const oscillator1 = audioContext.createOscillator();
-      const oscillator2 = audioContext.createOscillator();
-      const oscillator3 = audioContext.createOscillator();
+      const instrumentSelect = document.getElementById('instrument-select');
+      const selectedInstrument = instruments[instrumentSelect.value];
 
       const gainNode = audioContext.createGain();
       const filter = audioContext.createBiquadFilter();
+      const oscillators = [];
+      const gains = [];
 
-      // Main tone
-      oscillator1.type = 'triangle';
-      oscillator1.frequency.setValueAtTime(frequency, audioContext.currentTime);
+      // Add compressor for better dynamics
+      const compressor = audioContext.createDynamicsCompressor();
 
-      // Overtone for richness
-      oscillator2.type = 'sine';
-      oscillator2.frequency.setValueAtTime(frequency * 2, audioContext.currentTime);
+      // Add convolver for room simulation
+      const convolver = audioContext.createConvolver();
+      createReverb(audioContext, convolver, 2, 0.8);
 
-      // Sub-oscillator for depth
-      oscillator3.type = 'sine';
-      oscillator3.frequency.setValueAtTime(frequency / 2, audioContext.currentTime);
+      // Add distortion for hammer impact (only for piano)
+      let distortion;
+      if (instrumentSelect.value === 'piano') {
+        distortion = audioContext.createWaveShaper();
+        function makeDistortionCurve(amount) {
+          const k = amount;
+          const n_samples = 44100;
+          const curve = new Float32Array(n_samples);
+          const deg = Math.PI / 180;
 
-      // Configure filter
+          for (let i = 0; i < n_samples; i++) {
+            const x = (i * 2) / n_samples - 1;
+            curve[i] = (3 + k) * x * 20 * deg / (Math.PI + k * Math.abs(x));
+          }
+          return curve;
+        }
+        distortion.curve = makeDistortionCurve(5);
+        distortion.oversample = '4x';
+      }
+
+      selectedInstrument.oscillators.forEach(oscConfig => {
+        const oscillator = audioContext.createOscillator();
+        const oscGain = audioContext.createGain();
+
+        oscillator.type = oscConfig.type;
+        oscillator.frequency.setValueAtTime(frequency * oscConfig.ratio, audioContext.currentTime);
+        oscGain.gain.setValueAtTime(oscConfig.gain, audioContext.currentTime);
+
+        oscillator.connect(oscGain);
+        oscGain.connect(gainNode);
+        oscillators.push(oscillator);
+        gains.push(oscGain);
+      });
+
       filter.type = 'lowpass';
-      filter.frequency.setValueAtTime(5000, audioContext.currentTime);
-      filter.Q.setValueAtTime(1, audioContext.currentTime);
+      filter.frequency.setValueAtTime(selectedInstrument.filterFreq, audioContext.currentTime);
+      filter.Q.setValueAtTime(selectedInstrument.filterQ || 1, audioContext.currentTime);
 
-      // Set volumes
-      const mainGain = audioContext.createGain();
-      const overtonesGain = audioContext.createGain();
-      const subGain = audioContext.createGain();
+      // Modified effects chain for piano
+      if (instrumentSelect.value === 'piano') {
+        gainNode.connect(filter);
+        filter.connect(distortion);
+        distortion.connect(compressor);
+        compressor.connect(convolver);
+        convolver.connect(audioContext.destination);
 
-      mainGain.gain.setValueAtTime(0.7, audioContext.currentTime);
-      overtonesGain.gain.setValueAtTime(0.2, audioContext.currentTime);
-      subGain.gain.setValueAtTime(0.3, audioContext.currentTime);
+        // Modify compressor settings for bright piano
+        compressor.threshold.setValueAtTime(-15, audioContext.currentTime);
+        compressor.knee.setValueAtTime(4, audioContext.currentTime);
+        compressor.ratio.setValueAtTime(2.5, audioContext.currentTime);
+        compressor.attack.setValueAtTime(0.002, audioContext.currentTime);
+        compressor.release.setValueAtTime(0.15, audioContext.currentTime);
 
-      // Connect everything
-      oscillator1.connect(mainGain);
-      oscillator2.connect(overtonesGain);
-      oscillator3.connect(subGain);
-
-      mainGain.connect(gainNode);
-      overtonesGain.connect(gainNode);
-      subGain.connect(gainNode);
-
-      gainNode.connect(filter);
-      filter.connect(audioContext.destination);
+        // Create shorter, brighter reverb
+        createReverb(audioContext, convolver, 1.2, 0.3);
+      } else {
+        // Original effects chain for other instruments
+        gainNode.connect(filter);
+        filter.connect(compressor);
+        compressor.connect(convolver);
+        convolver.connect(audioContext.destination);
+      }
 
       return {
-        oscillators: [oscillator1, oscillator2, oscillator3],
+        oscillators,
         gainNode,
         filter,
+        compressor,
+        convolver,
+        distortion,
         start() {
           const now = audioContext.currentTime;
 
-          // ADSR envelope
-          gainNode.gain.setValueAtTime(0, now);
-          gainNode.gain.linearRampToValueAtTime(0.7, now + 0.02); // Attack
-          gainNode.gain.linearRampToValueAtTime(0.6, now + 0.05); // Decay
-          gainNode.gain.linearRampToValueAtTime(0.5, now + 0.2); // Sustain
+          if (instrumentSelect.value === 'piano') {
+            // Initial strike
+            gainNode.gain.setValueAtTime(0, now);
+            gainNode.gain.linearRampToValueAtTime(1.5, now + selectedInstrument.attack);
 
-          filter.frequency.setValueAtTime(0, now);
-          filter.frequency.linearRampToValueAtTime(5000, now + 0.1);
+            // Quick decay to sustain
+            gainNode.gain.exponentialRampToValueAtTime(
+              selectedInstrument.sustain,
+              now + selectedInstrument.attack + selectedInstrument.decay
+            );
 
-          this.oscillators.forEach(osc => osc.start(now));
+            // Dynamic filter movement
+            filter.frequency.setValueAtTime(8000, now);
+            filter.frequency.exponentialRampToValueAtTime(
+              selectedInstrument.filterFreq,
+              now + 0.05
+            );
+
+            // Reduce gain over time for natural decay
+            gainNode.gain.exponentialRampToValueAtTime(
+              selectedInstrument.sustain * 0.7,
+              now + selectedInstrument.attack + selectedInstrument.decay + 0.5
+            );
+          } else {
+            // Original envelope for other instruments
+            gainNode.gain.setValueAtTime(0, now);
+            gainNode.gain.linearRampToValueAtTime(1, now + selectedInstrument.attack);
+            gainNode.gain.linearRampToValueAtTime(
+              selectedInstrument.sustain,
+              now + selectedInstrument.attack + selectedInstrument.decay
+            );
+          }
+
+          oscillators.forEach(osc => osc.start(now));
         },
         stop() {
           const now = audioContext.currentTime;
+          const currentGain = gainNode.gain.value;
 
-          // Release
-          gainNode.gain.linearRampToValueAtTime(0, now + 0.2);
-          filter.frequency.linearRampToValueAtTime(0, now + 0.2);
+          if (instrumentSelect.value === 'piano') {
+            // Faster initial drop then gradual release
+            gainNode.gain.setValueAtTime(currentGain, now);
+            gainNode.gain.linearRampToValueAtTime(currentGain * 0.7, now + 0.02);
+            gainNode.gain.exponentialRampToValueAtTime(0.001, now + selectedInstrument.release);
+          } else {
+            // Original release for other instruments
+            gainNode.gain.setValueAtTime(currentGain, now);
+            gainNode.gain.exponentialRampToValueAtTime(0.001, now + selectedInstrument.release);
+          }
 
           setTimeout(() => {
-            this.oscillators.forEach(osc => {
+            oscillators.forEach(osc => {
               osc.stop();
               osc.disconnect();
             });
+            gains.forEach(gain => gain.disconnect());
             gainNode.disconnect();
             filter.disconnect();
-          }, 200);
+            compressor.disconnect();
+            convolver.disconnect();
+            if (distortion) distortion.disconnect();
+          }, selectedInstrument.release * 1000);
         }
       };
+    }
+
+    // Helper function to create reverb
+    function createReverb(audioContext, convolver, duration, decay) {
+      const sampleRate = audioContext.sampleRate;
+      const length = sampleRate * duration;
+      const impulse = audioContext.createBuffer(2, length, sampleRate);
+
+      for (let channel = 0; channel < 2; channel++) {
+        const channelData = impulse.getChannelData(channel);
+        for (let i = 0; i < length; i++) {
+          const t = i / sampleRate;
+          channelData[i] = (Math.random() * 2 - 1) * Math.pow(1 - t / duration, decay);
+        }
+      }
+
+      convolver.buffer = impulse;
     }
 
     function playNote(note) {
