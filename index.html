@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Browser Piano</title>
+  <style>
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+      background-color: #333;
+      font-family: Arial, sans-serif;
+    }
+
+    .piano {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 20px;
+      margin: 40px;
+      padding-left: 40px;
+      padding-right: 40px;
+    }
+
+    .piano-row {
+      position: relative;
+      display: flex;
+    }
+
+    .key {
+      position: relative;
+      width: 60px;
+      height: 200px;
+      background-color: white;
+      border: 1px solid #000;
+      display: flex;
+      justify-content: center;
+      align-items: flex-end;
+      padding-bottom: 10px;
+      cursor: pointer;
+      user-select: none;
+      margin-left: -1px;
+      box-sizing: border-box;
+    }
+
+    .key.black {
+      position: absolute;
+      width: 40px;
+      height: 120px;
+      background-color: black;
+      color: white;
+      z-index: 1;
+      transform: translateX(-20px);
+    }
+
+    .key:hover {
+      background-color: #f0f0f0;
+    }
+
+    .key.black:hover {
+      background-color: #333;
+    }
+
+    .key.pressed {
+      opacity: 0.5;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="piano"></div>
+
+  <script>
+    const keyMap = {
+      "2": "C#5", "3": "D#5", "5": "F#5", "6": "G#5", "7": "A#5", "9": "C#6", "0": "D#6",
+      "Q": "C5", "W": "D5", "E": "E5", "R": "F5", "T": "G5", "Y": "A5", "U": "B5",
+      "I": "C6", "O": "D6", "P": "E6",
+      "S": "C#4", "D": "D#4", "G": "F#4", "H": "G#4", "J": "A#4", "L": "C#5", ";": "D#5",
+      "Z": "C4", "X": "D4", "C": "E4", "V": "F4", "B": "G4", "N": "A4", "M": "B4",
+      ",": "C5", ".": "D5", "/": "E5"
+    };
+
+    const noteFrequencies = {
+      'C4': 261.63, 'C#4': 277.18, 'D4': 293.66, 'D#4': 311.13, 'E4': 329.63,
+      'F4': 349.23, 'F#4': 369.99, 'G4': 392.00, 'G#4': 415.30, 'A4': 440.00,
+      'A#4': 466.16, 'B4': 493.88, 'C5': 523.25, 'C#5': 554.37, 'D5': 587.33,
+      'D#5': 622.25, 'E5': 659.26, 'F5': 698.46, 'F#5': 739.99, 'G5': 783.99,
+      'G#5': 830.61, 'A5': 880.00, 'A#5': 932.33, 'B5': 987.77, 'C6': 1046.50,
+      'C#6': 1108.73, 'D6': 1174.66, 'D#6': 1244.51, 'E6': 1318.51
+    };
+
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const activeOscillators = new Map();
+    const activeGains = new Map();
+
+    // Create piano keys
+    const piano = document.querySelector('.piano');
+
+    // Create two rows
+    const bottomRow = document.createElement('div');
+    bottomRow.className = 'piano-row';
+    const topRow = document.createElement('div');
+    topRow.className = 'piano-row';
+
+    piano.appendChild(topRow);
+    piano.appendChild(bottomRow);
+
+    // Split notes into two rows
+    const bottomRowNotes = [
+      'C4', 'C#4', 'D4', 'D#4', 'E4', 'F4', 'F#4', 'G4', 'G#4', 'A4', 'A#4', 'B4'
+    ];
+
+    const topRowNotes = [
+      'C5', 'C#5', 'D5', 'D#5', 'E5', 'F5', 'F#5', 'G5', 'G#5', 'A5', 'A#5', 'B5', 'C6', 'C#6', 'D6', 'D#6', 'E6'
+    ];
+
+    function createKeys(notes, container) {
+      notes.forEach(note => {
+        const key = document.createElement('div');
+        key.dataset.note = note;
+
+        const isBlack = note.includes('#');
+        key.className = `key${isBlack ? ' black' : ''}`;
+
+        const keyboardKey = Object.entries(keyMap).find(([k, n]) => n === note)?.[0] || '';
+        key.textContent = keyboardKey;
+
+        if (!isBlack) {
+          container.appendChild(key);
+        } else {
+          const prevWhiteKey = container.lastElementChild;
+          if (prevWhiteKey) {
+            key.style.left = `${prevWhiteKey.offsetLeft + 40}px`;
+            container.appendChild(key);
+          }
+        }
+      });
+    }
+
+    // Create keys for both rows
+    createKeys(bottomRowNotes, bottomRow);
+    createKeys(topRowNotes, topRow);
+
+    function playNote(note) {
+      if (activeOscillators.has(note)) return;
+
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+
+      oscillator.type = 'sine';
+      oscillator.frequency.setValueAtTime(noteFrequencies[note], audioContext.currentTime);
+
+      gainNode.gain.setValueAtTime(0.5, audioContext.currentTime);
+
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+
+      oscillator.start();
+      activeOscillators.set(note, oscillator);
+      activeGains.set(note, gainNode);
+
+      const key = document.querySelector(`[data-note="${note}"]`);
+      if (key) key.classList.add('pressed');
+    }
+
+    function stopNote(note) {
+      const oscillator = activeOscillators.get(note);
+      const gainNode = activeGains.get(note);
+
+      if (oscillator && gainNode) {
+        gainNode.gain.setValueAtTime(gainNode.gain.value, audioContext.currentTime);
+        gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.1);
+
+        setTimeout(() => {
+          oscillator.stop();
+          oscillator.disconnect();
+          gainNode.disconnect();
+          activeOscillators.delete(note);
+          activeGains.delete(note);
+        }, 100);
+
+        const key = document.querySelector(`[data-note="${note}"]`);
+        if (key) key.classList.remove('pressed');
+      }
+    }
+
+    // Mouse/Touch events
+    piano.addEventListener('mousedown', e => {
+      if (e.target.classList.contains('key')) {
+        const note = e.target.dataset.note;
+        playNote(note);
+      }
+    });
+
+    piano.addEventListener('mouseup', e => {
+      if (e.target.classList.contains('key')) {
+        const note = e.target.dataset.note;
+        stopNote(note);
+      }
+    });
+
+    piano.addEventListener('mouseleave', e => {
+      if (e.target.classList.contains('key')) {
+        const note = e.target.dataset.note;
+        stopNote(note);
+      }
+    });
+
+    // Keyboard events
+    const pressedKeys = new Set();
+
+    window.addEventListener('keydown', e => {
+      const key = e.key.toUpperCase();
+      if (!pressedKeys.has(key) && keyMap[key]) {
+        pressedKeys.add(key);
+        playNote(keyMap[key]);
+      }
+    });
+
+    window.addEventListener('keyup', e => {
+      const key = e.key.toUpperCase();
+      if (pressedKeys.has(key) && keyMap[key]) {
+        pressedKeys.delete(key);
+        stopNote(keyMap[key]);
+      }
+    });
+
+    // Start audio context on first user interaction
+    document.addEventListener('click', () => {
+      if (audioContext.state === 'suspended') {
+        audioContext.resume();
+      }
+    }, { once: true });
+  </script>
+</body>
+
+</html>
