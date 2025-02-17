@@ -146,43 +146,106 @@
     createKeys(bottomRowNotes, bottomRow);
     createKeys(topRowNotes, topRow);
 
+    function createPianoSound(frequency) {
+      const oscillator1 = audioContext.createOscillator();
+      const oscillator2 = audioContext.createOscillator();
+      const oscillator3 = audioContext.createOscillator();
+
+      const gainNode = audioContext.createGain();
+      const filter = audioContext.createBiquadFilter();
+
+      // Main tone
+      oscillator1.type = 'triangle';
+      oscillator1.frequency.setValueAtTime(frequency, audioContext.currentTime);
+
+      // Overtone for richness
+      oscillator2.type = 'sine';
+      oscillator2.frequency.setValueAtTime(frequency * 2, audioContext.currentTime);
+
+      // Sub-oscillator for depth
+      oscillator3.type = 'sine';
+      oscillator3.frequency.setValueAtTime(frequency / 2, audioContext.currentTime);
+
+      // Configure filter
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(5000, audioContext.currentTime);
+      filter.Q.setValueAtTime(1, audioContext.currentTime);
+
+      // Set volumes
+      const mainGain = audioContext.createGain();
+      const overtonesGain = audioContext.createGain();
+      const subGain = audioContext.createGain();
+
+      mainGain.gain.setValueAtTime(0.7, audioContext.currentTime);
+      overtonesGain.gain.setValueAtTime(0.2, audioContext.currentTime);
+      subGain.gain.setValueAtTime(0.3, audioContext.currentTime);
+
+      // Connect everything
+      oscillator1.connect(mainGain);
+      oscillator2.connect(overtonesGain);
+      oscillator3.connect(subGain);
+
+      mainGain.connect(gainNode);
+      overtonesGain.connect(gainNode);
+      subGain.connect(gainNode);
+
+      gainNode.connect(filter);
+      filter.connect(audioContext.destination);
+
+      return {
+        oscillators: [oscillator1, oscillator2, oscillator3],
+        gainNode,
+        filter,
+        start() {
+          const now = audioContext.currentTime;
+
+          // ADSR envelope
+          gainNode.gain.setValueAtTime(0, now);
+          gainNode.gain.linearRampToValueAtTime(0.7, now + 0.02); // Attack
+          gainNode.gain.linearRampToValueAtTime(0.6, now + 0.05); // Decay
+          gainNode.gain.linearRampToValueAtTime(0.5, now + 0.2); // Sustain
+
+          filter.frequency.setValueAtTime(0, now);
+          filter.frequency.linearRampToValueAtTime(5000, now + 0.1);
+
+          this.oscillators.forEach(osc => osc.start(now));
+        },
+        stop() {
+          const now = audioContext.currentTime;
+
+          // Release
+          gainNode.gain.linearRampToValueAtTime(0, now + 0.2);
+          filter.frequency.linearRampToValueAtTime(0, now + 0.2);
+
+          setTimeout(() => {
+            this.oscillators.forEach(osc => {
+              osc.stop();
+              osc.disconnect();
+            });
+            gainNode.disconnect();
+            filter.disconnect();
+          }, 200);
+        }
+      };
+    }
+
     function playNote(note) {
       if (activeOscillators.has(note)) return;
 
-      const oscillator = audioContext.createOscillator();
-      const gainNode = audioContext.createGain();
-
-      oscillator.type = 'sine';
-      oscillator.frequency.setValueAtTime(noteFrequencies[note], audioContext.currentTime);
-
-      gainNode.gain.setValueAtTime(0.5, audioContext.currentTime);
-
-      oscillator.connect(gainNode);
-      gainNode.connect(audioContext.destination);
-
-      oscillator.start();
-      activeOscillators.set(note, oscillator);
-      activeGains.set(note, gainNode);
+      const pianoSound = createPianoSound(noteFrequencies[note]);
+      activeOscillators.set(note, pianoSound);
+      pianoSound.start();
 
       const key = document.querySelector(`[data-note="${note}"]`);
       if (key) key.classList.add('pressed');
     }
 
     function stopNote(note) {
-      const oscillator = activeOscillators.get(note);
-      const gainNode = activeGains.get(note);
+      const pianoSound = activeOscillators.get(note);
 
-      if (oscillator && gainNode) {
-        gainNode.gain.setValueAtTime(gainNode.gain.value, audioContext.currentTime);
-        gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.1);
-
-        setTimeout(() => {
-          oscillator.stop();
-          oscillator.disconnect();
-          gainNode.disconnect();
-          activeOscillators.delete(note);
-          activeGains.delete(note);
-        }, 100);
+      if (pianoSound) {
+        pianoSound.stop();
+        activeOscillators.delete(note);
 
         const key = document.querySelector(`[data-note="${note}"]`);
         if (key) key.classList.remove('pressed');
